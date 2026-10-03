@@ -63,6 +63,8 @@ class Board:
 
         self.configure_env(cfg, env)
 
+        self.disable_buggy_compiler_warnings(cfg, env)
+
         # Setup scripting:
         env.DEFINES.update(
             LUA_32BITS = 1,
@@ -265,6 +267,19 @@ class Board:
         cfg.env.LINKFLAGS += ['-lgcov', '-coverage']
         # cfg.env is post-merge, where DEFINES is a list of NAME=value
         cfg.env.DEFINES += ['HAL_COVERAGE_BUILD=1']
+
+    def disable_buggy_compiler_warnings(self, cfg, env):
+        '''stop warnings which are buggy in some compilers being errors.'''
+        if 'clang' in cfg.env.COMPILER_CXX:
+            return
+        if not (self.cc_version_gte(cfg, 14, 0) and self.cc_version_lte(cfg, 16, 2)):
+            return
+        # https://github.com/ArduPilot/ardupilot/issues/33206
+        # TODO: readdress following a 16.3+ release
+        env.CXXFLAGS += [
+            '-Wno-error=maybe-uninitialized',
+            '-Wno-error=array-bounds',
+        ]
 
     def configure_env(self, cfg, env):
         # Use a dictionary instead of the conventional list for definitions to
@@ -488,15 +503,6 @@ class Board:
                 ]
                 env.CFLAGS += [
                     '-Werror=dangling-pointer',
-                ]
-            if self.cc_version_gte(cfg, 14, 0) and self.cc_version_lte(cfg, 16, 2):
-                # the following warnings appear to be buggy in later compiler versions
-                # https://github.com/ArduPilot/ardupilot/issues/33206
-                # TODO: readdress following a 16.3+ release
-                env.CXXFLAGS += [
-                    '-Wno-error=maybe-uninitialized',
-                    '-Wno-error=format-truncation',
-                    '-Wno-error=array-bounds',
                 ]
 
         if cfg.env.TOOLCHAIN == "custom":
@@ -938,6 +944,17 @@ class SITLBoard(Board):
                 cfg.fatal("Tools/autotest/default_params/%s uses .param extension; rename to .parm so it is embedded in ROMFS" % f)
             if fnmatch.fnmatch(f, "*.parm"):
                 env.ROMFS_FILES += [('default_params/'+f,'Tools/autotest/default_params/'+f)]
+
+        # autotest's fixtures, all kept under autotest_fixtures.  a file and
+        # a directory whose names are longer than a directory entry holds,
+        # so autotest can check that listing them is safe
+        for name in ('f' * 300, 'd' * 300 + '/file'):
+            env.ROMFS_FILES += [('autotest_fixtures/long_names/' + name, 'Tools/autotest/default_params/copter-X.parm')]
+
+        # files named like the directory beside them, which sort just before
+        # it, at the top level and below, so autotest can check both listed
+        for name in ('autotest_fixtures.txt', 'autotest_fixtures/nested/sub.txt', 'autotest_fixtures/nested/sub/file'):
+            env.ROMFS_FILES += [(name, 'Tools/autotest/default_params/copter-X.parm')]
 
         if cfg.options.sitl_rgbled:
             env.CXXFLAGS += ['-DWITH_SITL_RGBLED']

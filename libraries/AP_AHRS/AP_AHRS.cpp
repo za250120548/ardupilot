@@ -759,10 +759,8 @@ bool AP_AHRS::_should_use_airspeed_sensor(uint8_t airspeed_index) const
 // if we have an estimate
 bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_estimate_type) const
 {
-#if AP_AHRS_DCM_ENABLED || AP_AIRSPEED_ENABLED
-    const uint8_t idx = get_active_airspeed_index();
-#endif
 #if AP_AIRSPEED_ENABLED
+    const uint8_t idx = get_active_airspeed_index();
     if (_should_use_airspeed_sensor(idx)) {
         airspeed_ret = AP::airspeed().get_airspeed(idx);
 
@@ -799,7 +797,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
 #if AP_AHRS_DCM_ENABLED
     case EKFType::DCM:
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, airspeed_ret);
 #endif
 
 #if AP_AHRS_SIM_ENABLED
@@ -812,7 +810,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
     case EKFType::TWO:
 #if AP_AHRS_DCM_ENABLED
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, airspeed_ret);
 #else
         return false;
 #endif
@@ -829,7 +827,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
     case EKFType::EXTERNAL:
 #if AP_AHRS_DCM_ENABLED
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, airspeed_ret);
 #else
         return false;
 #endif
@@ -857,7 +855,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
 #if AP_AHRS_DCM_ENABLED
     // fallback to DCM
     airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-    return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
+    return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, airspeed_ret);
 #endif
 
     return false;
@@ -1010,49 +1008,17 @@ AP_AHRS_Backend::Estimates *AP_AHRS::estimates_for_type(EKFType type)
 bool AP_AHRS::set_origin(const Location &loc)
 {
     WITH_SEMAPHORE(_rsem);
-#if HAL_NAVEKF2_AVAILABLE
-    const bool ret2 = ekf2.set_origin(loc);
-#endif
-#if HAL_NAVEKF3_AVAILABLE
-    const bool ret3 = ekf3.set_origin(loc);
-#endif
-#if AP_AHRS_EXTERNAL_ENABLED
-    const bool ret_ext = external.set_origin(loc);
-#endif
-
-    // return success if active EKF's origin was set
-    bool success = false;
-    switch (active_EKF_type()) {
-#if AP_AHRS_DCM_ENABLED
-    case EKFType::DCM:
-        break;
-#endif
-
-#if HAL_NAVEKF2_AVAILABLE
-    case EKFType::TWO:
-        success = ret2;
-        break;
-#endif
-
-#if HAL_NAVEKF3_AVAILABLE
-    case EKFType::THREE:
-        success = ret3;
-        break;
-#endif
-
-#if AP_AHRS_SIM_ENABLED
-    case EKFType::SIM:
-        // never allow origin set in SITL. The origin is set by the
-        // simulation backend
-        break;
-#endif
-#if AP_AHRS_EXTERNAL_ENABLED
-    case EKFType::EXTERNAL:
-        success = ret_ext;
-        break;
-#endif
+    for (auto &backend_and_estimates : backends_and_estimates) {
+        auto &backend = backend_and_estimates.backend;
+        if (&backend == active_backend) {
+            continue;
+        }
+        // note that SITL and DCM ignore this set_origin call via
+        // an empty base-class implementation:
+        backend.set_origin(loc);
     }
-    return success;
+    // return success if active EKF's origin was set
+    return active_backend->set_origin(loc);
 }
 
 // Record the current valid origin to parameters
