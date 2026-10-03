@@ -41,7 +41,7 @@ const AP_Param::GroupInfo AC_CustomControl::var_info[] = {
     AP_SUBGROUPVARPTR(_backend, "2_", 7, AC_CustomControl, _backend_var_info[1]),
 
     // @Group: 3_
-    // parameters for NLC controller
+    // @Path: AC_CustomControl_NLC.cpp
     AP_SUBGROUPVARPTR(_backend, "3_", 8, AC_CustomControl, _backend_var_info[2]),
 
     AP_GROUPEND

@@ -54,6 +54,7 @@ Currently, there 4 custom controller backend available. These are
 
 - Empty backend `CC_TYPE` = 1
 - PID backend `CC_TYPE` = 2
+- NLC Super-Twisting backend `CC_TYPE` = 3
 
 ### Empty Controller - `CC_TYPE` = 1
 
@@ -62,6 +63,33 @@ The empty controller does not do any calculations. It is created to make it easi
 ### PID Controller - `CC_TYPE` = 2
 
 PID controller backend has the same controller architecture as the main controller. It doesn't have any safeguarding mechanism such as acceleration limiting or rate limiting. The default gains are scaled 0.9 times to differentiate the custom controller response from the main one. Since this controller does not have acceleration limiting, specifically a square root controller, it would be safer to give a gentle command while flying with it. Although it has the same architecture as the main one, a proper reset functionality is not implemented intentionally to make it easier to detect the effect of improper resetting.
+
+### NLC Super-Twisting Sliding Mode Controller - `CC_TYPE` = 3
+
+Second-order (high-order) sliding mode controller based on the Super-Twisting
+Algorithm (STA). It replaces both the attitude P loop and the rate PID loop of
+the selected axes. Per body axis:
+
+```text
+e      attitude error from thrust_heading_rotation_angles()      [rad]
+w_ff   input-shaping angular velocity feed-forward, body frame  [rad/s]
+s      = LAM*e + w_ff - w          sliding variable              [rad/s]
+u      = K1*|s|^0.5*sign(s) + v    mixer input (-1..1)
+dv/dt  = K2*sign_eps(s),  sign_eps(s) = s/(|s|+EPS)  (EPS=0 -> pure sign)
+```
+
+Safeguards: `|v| <= VMAX`, integration frozen in the direction of mixer
+saturation (`AP_Motors::limit`), `u` constrained to [-1, 1], `v` zeroed while
+landed / at ground idle, and `v` initialised from the main controller output
+when switching in (bumpless transfer).
+
+Parameters (prefix `CC3_`): `LAM_R/P/Y`, `K1_R/P/Y`, `K2_R/P/Y`, `VMAX`, `EPS`,
+`OPT` (bit 0: write the `CNLC` log message every loop, bit 1: disable the
+saturation integrator freeze).
+
+`Tools/NLC/sitl_rms_test.py` flies the same stick profile in ALT_HOLD with the
+main controller and with this backend and prints RMS rate / attitude tracking
+error and control roughness for both.
 
 ## How To Use It
 
