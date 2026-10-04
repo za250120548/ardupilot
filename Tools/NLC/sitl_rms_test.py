@@ -31,9 +31,17 @@ import tempfile
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, os.path.join(ROOT, 'modules', 'mavlink'))
 os.environ.setdefault('MAVLINK20', '1')
-from pymavlink import mavutil, DFReader  # noqa: E402
+try:
+    # pymavlink installed with pip (normal ArduPilot / MAVProxy setup)
+    from pymavlink import mavutil, DFReader  # noqa: E402
+    mavutil.mavlink.MAV_CMD_NAV_TAKEOFF
+except (ImportError, AttributeError):
+    # fallback: copy inside the ArduPilot tree (needs the generated dialect)
+    sys.path.insert(0, os.path.join(ROOT, 'modules', 'mavlink'))
+    for k in [k for k in sys.modules if k.startswith('pymavlink')]:
+        del sys.modules[k]
+    from pymavlink import mavutil, DFReader  # noqa: E402
 
 HOME = '-35.363261,149.165230,584,353'
 
