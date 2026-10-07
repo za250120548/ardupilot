@@ -18,9 +18,13 @@ reports its own sliding variable from the CNLC message.
 Usage (from the ArduPilot root, after ./waf copter):
     python3 Tools/NLC/sitl_rms_test.py --speedup 5
     python3 Tools/NLC/sitl_rms_test.py --param CC3_K1_R=0.12 --param CC3_K2_R=0.4
+
+Each run also writes separate PID/STA attitude and rate CSV files, suitable for
+plotting measured and desired roll, pitch, and yaw over time.
 """
 
 import argparse
+import csv
 import glob
 import math
 import os
@@ -47,18 +51,19 @@ HOME = '-35.363261,149.165230,584,353'
 
 # deterministic stick profile: (seconds, roll_pwm, pitch_pwm, yaw_pwm)
 PROFILE = [
-    (3.0, 1500, 1500, 1500),     # hover
-    (1.0, 1700, 1500, 1500),     # roll doublet
-    (1.0, 1300, 1500, 1500),
-    (2.0, 1500, 1500, 1500),
-    (1.0, 1500, 1700, 1500),     # pitch doublet
-    (1.0, 1500, 1300, 1500),
-    (2.0, 1500, 1500, 1500),
-    (1.0, 1500, 1500, 1700),     # yaw doublet
-    (1.0, 1500, 1500, 1300),
-    (2.0, 1500, 1500, 1500),
-    (1.5, 1650, 1650, 1500),     # combined roll + pitch
-    (1.5, 1350, 1350, 1500),
+    # time, roll, pitch, yaw
+    (3.0, 1500, 1500, 1500),    # hover
+    (1.0, 1700, 1500, 1500),    # roll right
+    (1.0, 1300, 1500, 1500),    # roll left
+    (2.0, 1500, 1500, 1500),    # settle
+    (1.0, 1500, 1700, 1500),    # pitch forward
+    (1.0, 1500, 1300, 1500),    # pitch backward
+    (2.0, 1500, 1500, 1500),    # settle
+    (1.0, 1500, 1500, 1700),    # yaw clockwise
+    (1.0, 1500, 1500, 1300),    # yaw counter-clockwise
+    (2.0, 1500, 1500, 1500),    # settle
+    (4.0, 1650, 1650, 1500),    # combined roll right + pitch forward
+    (4.0, 1350, 1350, 1500),    # combined roll left + pitch backward
     (3.0, 1500, 1500, 1500),     # settle
 ]
 
@@ -162,6 +167,7 @@ def analyse(logfile, windows):
     """windows: dict name -> (t0_us, t1_us)"""
     res = {k: {'R': [], 'P': [], 'Y': [], 'aR': [], 'aP': [], 'sR': [], 'sP': [], 'sY': [],
                'oR': [], 'oP': [], 'oY': []} for k in windows}
+    samples = {k: {'attitude': [], 'rate': []} for k in windows}
     log = DFReader.DFReader_binary(logfile, zero_time_base=False)
     while True:
         m = log.recv_match(type=['RATE', 'ATT', 'CNLC'])
@@ -178,9 +184,13 @@ def analyse(logfile, windows):
                     d['oR'].append(m.ROut)
                     d['oP'].append(m.POut)
                     d['oY'].append(m.YOut)
+                    samples[k]['rate'].append(
+                        (t - a, m.R, m.P, m.Y, m.RDes, m.PDes, m.YDes))
                 elif m.get_type() == 'ATT':
                     d['aR'].append(m.DesRoll - m.Roll)
                     d['aP'].append(m.DesPitch - m.Pitch)
+                    samples[k]['attitude'].append(
+                        (t - a, m.Roll, m.Pitch, m.Yaw, m.DesRoll, m.DesPitch, m.DesYaw))
                 else:
                     d[['sR', 'sP', 'sY'][m.I]].append(math.degrees(m.S))
     out = {}
@@ -192,7 +202,29 @@ def analyse(logfile, windows):
             o = d['o' + ax]
             out[k]['dU' + ax] = rms([o[i+1] - o[i] for i in range(len(o) - 1)])
         out[k]['n'] = len(d['R'])
-    return out
+    return out, samples
+
+
+def write_samples(samples, output_dir):
+    """Write measured and desired RPY samples to one CSV per phase and message."""
+    columns = {
+        'attitude': ('time_s', 'roll_deg', 'pitch_deg', 'yaw_deg',
+                     'des_roll_deg', 'des_pitch_deg', 'des_yaw_deg'),
+        'rate': ('time_s', 'roll_deg_s', 'pitch_deg_s', 'yaw_deg_s',
+                 'des_roll_deg_s', 'des_pitch_deg_s', 'des_yaw_deg_s'),
+    }
+    os.makedirs(output_dir, exist_ok=True)
+    paths = []
+    for phase, messages in samples.items():
+        for message, header in columns.items():
+            path = os.path.join(output_dir, '%s_%s.csv' % (phase, message))
+            with open(path, 'w', newline='') as output:
+                writer = csv.writer(output)
+                writer.writerow(header)
+                for sample in messages[message]:
+                    writer.writerow((sample[0] / 1e6,) + sample[1:])
+            paths.append(path)
+    return paths
 
 
 def main():
@@ -200,6 +232,8 @@ def main():
     ap.add_argument('--binary', default=os.path.join(ROOT, 'build/sitl/bin/arducopter'))
     ap.add_argument('--speedup', type=int, default=1)
     ap.add_argument('--param', action='append', default=[], help='NAME=VALUE applied before flight')
+    ap.add_argument('--csv-dir', help='directory for the PID/STA attitude and rate CSV files '
+                                     '(default: the SITL work directory)')
     ap.add_argument('--clean', action='store_true', help='delete the work directory (and log) at the end')
     args = ap.parse_args()
 
@@ -236,15 +270,18 @@ def main():
             sitl.pump(0.2, thr=1500)
             if time.time() > t_end:
                 raise RuntimeError('takeoff timeout')
-        print('at altitude, switching to ALT_HOLD')
+        print('altitude reached, switching to ALT_HOLD')
         sitl.mode('ALT_HOLD')
         sitl.pump(3.0 / args.speedup)
 
-        print('phase A: main controller (P+PID)')
+        print('phase A: Testing main controller (P+PID)')
         win_a = fly_profile(sitl, 1000, args.speedup)
-        print('phase B: NLC Super-Twisting controller')
+
+        print('phase B: Testing NLC Super-Twisting controller')
+        #switch to NLC controller by raising RC6, then fly the same profile
         sitl.pump(1.0 / args.speedup, ch6=2000)
         win_b = fly_profile(sitl, 2000, args.speedup)
+        #turn NLC off again so we can land with the main controller
         sitl.pump(1.0 / args.speedup, ch6=1000)
 
         sitl.mode('LAND')
@@ -254,7 +291,9 @@ def main():
         sitl.stop()
 
         logs = sorted(glob.glob(os.path.join(work, 'logs', '*.BIN')), key=os.path.getmtime)
-        res = analyse(logs[-1], {'PID': win_a, 'STA': win_b})
+        res, samples = analyse(logs[-1], {'PID': win_a, 'STA': win_b})
+        csv_dir = os.path.abspath(args.csv_dir) if args.csv_dir else work
+        csv_paths = write_samples(samples, csv_dir)
 
         print('\nRMS tracking error (deg/s for rate, deg for attitude)')
         print('%-6s %8s %8s %8s %8s %8s %6s' % ('', 'rate R', 'rate P', 'rate Y', 'att R', 'att P', 'n'))
@@ -270,6 +309,9 @@ def main():
         for ax in ('R', 'P', 'Y'):
             a, b = res['PID'][ax], res['STA'][ax]
             print('  rate %s: %+6.1f %%' % (ax, 100.0 * (a - b) / a))
+        print('\nRPY sample CSVs:')
+        for path in csv_paths:
+            print(' ', path)
         print('log:', logs[-1])
     finally:
         sitl.stop()
