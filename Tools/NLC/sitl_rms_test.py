@@ -25,6 +25,7 @@ plotting measured and desired roll, pitch, and yaw over time.
 
 import argparse
 import csv
+import datetime
 import glob
 import math
 import os
@@ -227,19 +228,41 @@ def write_samples(samples, output_dir):
     return paths
 
 
+def clean_workdir(path, preexisting):
+    """Remove only what this run created in path; preexisting is None if path itself was created."""
+    if preexisting is None:
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    for name in set(os.listdir(path)) - preexisting:
+        target = os.path.join(path, name)
+        if os.path.isdir(target) and not os.path.islink(target):
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            os.remove(target)
+
+
 def main():
+
+    #save the log and CSVs in /tmp/nlc_sitl_<timestamp> if no other directory is given, so that the user can inspect them after the run
+    work = os.path.join(tempfile.gettempdir(),
+                            'nlc_sitl_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+
     ap = argparse.ArgumentParser()
     ap.add_argument('--binary', default=os.path.join(ROOT, 'build/sitl/bin/arducopter'))
     ap.add_argument('--speedup', type=int, default=1)
     ap.add_argument('--param', action='append', default=[], help='NAME=VALUE applied before flight')
-    ap.add_argument('--csv-dir', help='directory for the PID/STA attitude and rate CSV files '
-                                     '(default: the SITL work directory)')
-    ap.add_argument('--clean', action='store_true', help='delete the work directory (and log) at the end')
+    ap.add_argument('--log-dir', help='directory for the PID/STA attitude and rate logs and CSV files ', default=work)
+    ap.add_argument('--clean', action='store_true', help='at the end, delete the files and directories '
+                                                           'this run created in the log directory')
     args = ap.parse_args()
 
-    work = tempfile.mkdtemp(prefix='nlc_sitl_')
-    print('work dir:', work)
-    sitl = SITL(args.binary, work, args.speedup)
+    
+    args.log_dir = os.path.abspath(args.log_dir)
+    preexisting = set(os.listdir(args.log_dir)) if os.path.isdir(args.log_dir) else None
+    os.makedirs(args.log_dir, exist_ok=True)
+    
+    print('work dir:', args.log_dir)
+    sitl = SITL(args.binary, args.log_dir, args.speedup)
     try:
         # first boot: configure, then reboot so CC_TYPE takes effect
         sitl.start(wipe=True)
@@ -290,10 +313,9 @@ def main():
             sitl.pump(0.5)
         sitl.stop()
 
-        logs = sorted(glob.glob(os.path.join(work, 'logs', '*.BIN')), key=os.path.getmtime)
+        logs = sorted(glob.glob(os.path.join(args.log_dir, 'logs', '*.BIN')), key=os.path.getmtime)
         res, samples = analyse(logs[-1], {'PID': win_a, 'STA': win_b})
-        csv_dir = os.path.abspath(args.csv_dir) if args.csv_dir else work
-        csv_paths = write_samples(samples, csv_dir)
+        csv_paths = write_samples(samples, args.log_dir)
 
         print('\nRMS tracking error (deg/s for rate, deg for attitude)')
         print('%-6s %8s %8s %8s %8s %8s %6s' % ('', 'rate R', 'rate P', 'rate Y', 'att R', 'att P', 'n'))
@@ -316,7 +338,7 @@ def main():
     finally:
         sitl.stop()
         if args.clean:
-            shutil.rmtree(work, ignore_errors=True)
+            clean_workdir(args.log_dir, preexisting)
 
 
 if __name__ == '__main__':
