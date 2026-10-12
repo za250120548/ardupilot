@@ -168,7 +168,7 @@ def analyse(logfile, windows):
     """windows: dict name -> (t0_us, t1_us)"""
     res = {k: {'R': [], 'P': [], 'Y': [], 'aR': [], 'aP': [], 'sR': [], 'sP': [], 'sY': [],
                'oR': [], 'oP': [], 'oY': []} for k in windows}
-    samples = {k: {'attitude': [], 'rate': []} for k in windows}
+    samples = {k: {'attitude': [], 'rate': [], 'cnlc': []} for k in windows}
     log = DFReader.DFReader_binary(logfile, zero_time_base=False)
     while True:
         m = log.recv_match(type=['RATE', 'ATT', 'CNLC'])
@@ -194,6 +194,14 @@ def analyse(logfile, windows):
                         (t - a, m.Roll, m.Pitch, m.Yaw, m.DesRoll, m.DesPitch, m.DesYaw))
                 else:
                     d[['sR', 'sP', 'sY'][m.I]].append(math.degrees(m.S))
+                    if m.I == 0:
+                        I0 = [t-a,m.U, None,None]
+                        samples[k]['cnlc'].append(I0)
+                    elif m.I == 1 or m.I == 2:
+                        samples[k]['cnlc'][-1][m.I+1] = m.U
+                    elif m.I != 0 and (len(samples[k]['cnlc']) == 0 or samples[k]['cnlc'][-1][0] != t-a):
+                        #ignore do nothing, CNLC message window started after the first sample, so we don't have a complete sample to add yet
+                        pass
     out = {}
     for k, d in res.items():
         out[k] = {key: rms(v) for key, v in d.items() if not key.startswith('o')}
@@ -203,6 +211,9 @@ def analyse(logfile, windows):
             o = d['o' + ax]
             out[k]['dU' + ax] = rms([o[i+1] - o[i] for i in range(len(o) - 1)])
         out[k]['n'] = len(d['R'])
+    #Convert from list to tuple to comply with the CSV writer that write tuples, not lists
+    for k in samples:
+        samples[k]['cnlc'] = [tuple(row) for row in samples[k]['cnlc']]
     return out, samples
 
 
@@ -213,6 +224,7 @@ def write_samples(samples, output_dir):
                      'des_roll_deg', 'des_pitch_deg', 'des_yaw_deg'),
         'rate': ('time_s', 'roll_deg_s', 'pitch_deg_s', 'yaw_deg_s',
                  'des_roll_deg_s', 'des_pitch_deg_s', 'des_yaw_deg_s'),
+        'cnlc': ('time_s', 'U_roll', 'U_pitch', 'U_yaw'),
     }
     os.makedirs(output_dir, exist_ok=True)
     paths = []
@@ -244,8 +256,9 @@ def clean_workdir(path, preexisting):
 def main():
 
     #save the log and CSVs in /tmp/nlc_sitl_<timestamp> if no other directory is given, so that the user can inspect them after the run
-    work = os.path.join(tempfile.gettempdir(),
-                            'nlc_sitl_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    foldername = 'nlc_sitl_'+timestamp
+    work = os.path.join(tempfile.gettempdir(),foldername)
 
     ap = argparse.ArgumentParser()
     ap.add_argument('--binary', default=os.path.join(ROOT, 'build/sitl/bin/arducopter'))
@@ -257,7 +270,7 @@ def main():
     args = ap.parse_args()
 
     
-    args.log_dir = os.path.abspath(args.log_dir)
+    args.log_dir = os.path.abspath(args.log_dir+foldername)
     preexisting = set(os.listdir(args.log_dir)) if os.path.isdir(args.log_dir) else None
     os.makedirs(args.log_dir, exist_ok=True)
     
