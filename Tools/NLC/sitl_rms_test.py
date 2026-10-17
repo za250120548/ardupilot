@@ -166,8 +166,8 @@ def rms(vals):
 
 def analyse(logfile, windows):
     """windows: dict name -> (t0_us, t1_us)"""
-    res = {k: {'R': [], 'P': [], 'Y': [], 'aR': [], 'aP': [], 'sR': [], 'sP': [], 'sY': [],
-               'oR': [], 'oP': [], 'oY': []} for k in windows}
+    #Dictionary of lists for each test phase (PID and STA)
+    res = {k: {'rate_Re': [], 'rate_Pe': [], 'rate_Ye': [], 'att_Re': [], 'att_Pe': [], 'sR': [], 'sP': [], 'sY': [], 'oR': [], 'oP': [], 'oY': []} for k in windows}
     samples = {k: {'attitude': [], 'rate': [], 'cnlc': []} for k in windows}
     log = DFReader.DFReader_binary(logfile, zero_time_base=False)
     while True:
@@ -175,33 +175,39 @@ def analyse(logfile, windows):
         if m is None:
             break
         t = m.TimeUS
+        #print(f'message: {m.get_type()} time: {t}')
         for k, (a, b) in windows.items():
-            if a <= t <= b:
-                d = res[k]
+            if a <= t <= b: #confirm the time is within the window for this Test_phase ( Test phase A or Test phase B)
+                d = res[k]#dictionary for the current test phase
                 if m.get_type() == 'RATE':
-                    d['R'].append(m.RDes - m.R)
-                    d['P'].append(m.PDes - m.P)
-                    d['Y'].append(m.YDes - m.Y)
+                    #Calculate the error 'e' between the desired and actual Roll, Pitch and Yaw values in deg/sec.
+                    #and append them to the corresponding lists for later RMS calculation
+                    d['rate_Re'].append(m.RDes - m.R)
+                    d['rate_Pe'].append(m.PDes - m.P)
+                    d['rate_Ye'].append(m.YDes - m.Y)
+                    # Controller Roll, Pitch, Yaw output to the motor mixer
                     d['oR'].append(m.ROut)
                     d['oP'].append(m.POut)
                     d['oY'].append(m.YOut)
-                    samples[k]['rate'].append(
-                        (t - a, m.R, m.P, m.Y, m.RDes, m.PDes, m.YDes))
+                    #save time stamp, current R,P,Y and target R,P,Y for CSV output
+                    samples[k]['rate'].append((t - a, m.R, m.P, m.Y, m.RDes, m.PDes, m.YDes))
                 elif m.get_type() == 'ATT':
-                    d['aR'].append(m.DesRoll - m.Roll)
-                    d['aP'].append(m.DesPitch - m.Pitch)
+                    #save Attitude error between desired and actual Roll and Pitch values in deg.
+                    d['att_Re'].append(m.DesRoll - m.Roll)
+                    d['att_Pe'].append(m.DesPitch - m.Pitch)
                     samples[k]['attitude'].append(
                         (t - a, m.Roll, m.Pitch, m.Yaw, m.DesRoll, m.DesPitch, m.DesYaw))
-                else:
+                elif m.get_type() == 'CNLC':
                     d[['sR', 'sP', 'sY'][m.I]].append(math.degrees(m.S))
                     if m.I == 0:
                         I0 = [t-a,m.U, None,None]
                         samples[k]['cnlc'].append(I0)
-                    elif m.I == 1 or m.I == 2:
+                    elif samples[k]['cnlc']:
+                        # axes 1 and 2 complete the row opened by axis 0; if the window started
+                        # mid-sample there is no open row yet, so they are skipped
                         samples[k]['cnlc'][-1][m.I+1] = m.U
-                    elif m.I != 0 and (len(samples[k]['cnlc']) == 0 or samples[k]['cnlc'][-1][0] != t-a):
-                        #ignore do nothing, CNLC message window started after the first sample, so we don't have a complete sample to add yet
-                        pass
+                else:
+                    raise RuntimeError('unexpected message type %s' % m.get_type())
     out = {}
     for k, d in res.items():
         out[k] = {key: rms(v) for key, v in d.items() if not key.startswith('o')}
@@ -210,7 +216,7 @@ def analyse(logfile, windows):
         for ax in 'RPY':
             o = d['o' + ax]
             out[k]['dU' + ax] = rms([o[i+1] - o[i] for i in range(len(o) - 1)])
-        out[k]['n'] = len(d['R'])
+        out[k]['n'] = len(d['rate_Re'])  # number of samples in this phase
     #Convert from list to tuple to comply with the CSV writer that write tuples, not lists
     for k in samples:
         samples[k]['cnlc'] = [tuple(row) for row in samples[k]['cnlc']]
@@ -262,7 +268,7 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument('--binary', default=os.path.join(ROOT, 'build/sitl/bin/arducopter'))
-    ap.add_argument('--speedup', type=int, default=1)
+    ap.add_argument('--speedup', type=int, default=5)
     ap.add_argument('--param', action='append', default=[], help='NAME=VALUE applied before flight')
     ap.add_argument('--log-dir', help='directory for the PID/STA attitude and rate logs and CSV files ', default=work)
     ap.add_argument('--clean', action='store_true', help='at the end, delete the files and directories '
@@ -334,7 +340,7 @@ def main():
         print('%-6s %8s %8s %8s %8s %8s %6s' % ('', 'rate R', 'rate P', 'rate Y', 'att R', 'att P', 'n'))
         for k in ('PID', 'STA'):
             r = res[k]
-            print('%-6s %8.3f %8.3f %8.3f %8.3f %8.3f %6d' % (k, r['R'], r['P'], r['Y'], r['aR'], r['aP'], r['n']))
+            print('%-6s %8.3f %8.3f %8.3f %8.3f %8.3f %6d' % (k, r['rate_Re'], r['rate_Pe'], r['rate_Ye'], r['att_Re'], r['att_Pe'], r['n']))
         print('\ncontrol roughness, RMS of per-sample change of mixer input')
         print('%-6s %8s %8s %8s' % ('', 'dU R', 'dU P', 'dU Y'))
         for k in ('PID', 'STA'):
@@ -342,8 +348,8 @@ def main():
             print('%-6s %8.5f %8.5f %8.5f' % (k, r['dUR'], r['dUP'], r['dUY']))
         print('\nimprovement STA vs PID (positive = STA better)')
         for ax in ('R', 'P', 'Y'):
-            a, b = res['PID'][ax], res['STA'][ax]
-            print('  rate %s: %+6.1f %%' % (ax, 100.0 * (a - b) / a))
+            pid_rmse, sta_rmse = res['PID']['rate_'+ax+'e'], res['STA']['rate_'+ax+'e']
+            print('  rate %s: %+6.1f %%' % (ax, 100.0 * (pid_rmse - sta_rmse) / pid_rmse))
         print('\nRPY sample CSVs:')
         for path in csv_paths:
             print(' ', path)
