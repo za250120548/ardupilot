@@ -101,16 +101,21 @@ void AC_CustomControl::update(void)
 
 // choose which axis to apply custom controller output
 void AC_CustomControl::motor_set(Vector3f rpy) {
+    // set the FeedForward FF = 0 to avoid any unexpected behavior on the custom controller output.
+    //ensures that the custom controller has full control over axis without any interference from the FF component.
     if (_custom_controller_mask & (uint8_t)CustomControlOption::ROLL) {
         _motors->set_roll(rpy.x);
+        _motors->set_roll_ff(0.0f);
         _att_control->get_rate_roll_pid().set_integrator(0.0);
     }
     if (_custom_controller_mask & (uint8_t)CustomControlOption::PITCH) {
         _motors->set_pitch(rpy.y);
+        _motors->set_pitch_ff(0.0f);
         _att_control->get_rate_pitch_pid().set_integrator(0.0);
     }
     if (_custom_controller_mask & (uint8_t)CustomControlOption::YAW) {
         _motors->set_yaw(rpy.z);
+        _motors->set_yaw_ff(0.0f);
         _att_control->get_rate_yaw_pid().set_integrator(0.0);
     }
 }
