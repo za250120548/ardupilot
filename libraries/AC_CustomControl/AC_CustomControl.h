@@ -58,6 +58,10 @@ protected:
         YAW = 1 << 2,
     };
 
+    //True when the vehicle is in fast loop mode (i.e. the attitude controller is running at a higher rate than the main loop)
+    //in that case rate controller and motor output are running in a separate thread and custom controller overwrite is possible
+    bool fast_rate_enabled(void);
+
     // Intersampling period in seconds
     float _dt;
     bool _custom_controller_active;
@@ -69,6 +73,11 @@ protected:
 
     AP_Enum<CustomControlType> _controller_type;
     AP_Int8 _custom_controller_mask;
+    
+    // pointer to the vehicle FSTRATE_ENABLE parameter (nullptr if it does not exist)
+    AP_Param *_fstrate_param;
+    enum ap_var_type _fstrate_param_type;
+    uint32_t _last_fstrate_warn_ms;
 
 private:
     AC_CustomControl_Backend *_backend;

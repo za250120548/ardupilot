@@ -55,11 +55,17 @@ AC_CustomControl::AC_CustomControl(AP_AHRS_View*& ahrs, AC_AttitudeControl*& att
     _motors(motors)
 {
     AP_Param::setup_object_defaults(this, var_info);
+    // initialize the fstrate parameter pointer and type
+    _fstrate_param = nullptr;
+    _fstrate_param_type = AP_PARAM_NONE;
+    _last_fstrate_warn_ms = 0;
 }
 
 void AC_CustomControl::init(void)
 {
     _dt = AP::scheduler().get_loop_period_s();
+    //FSTRATE_ENABLE exists on builds with fast rate thread, if not found nullptr is returned
+    _fstrate_param = AP_Param::find("FSTRATE_ENABLE", &_fstrate_param_type);
 
     switch (CustomControlType(_controller_type))
     {
@@ -90,6 +96,18 @@ void AC_CustomControl::init(void)
 // run custom controller if it is activated by RC switch and appropriate type is selected
 void AC_CustomControl::update(void)
 {
+    if(_custom_controller_active && fast_rate_enabled()) {
+        static uint32_t now_ms = AP_HAL::millis(); // get time in milliseconds
+        // log a warning every 5 seconds if the custom controller is active but the fast loop is not enabled
+        if (now_ms - _last_fstrate_warn_ms > 2000) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "CC: FSTRATE_ENABLE != 0, Custom Controller disabled");
+            _last_fstrate_warn_ms = now_ms;
+        }
+        // in fast rate loop mode, the PID is running in a separate thread, potential overwrite of motor output
+        set_custom_controller(false);
+        return;
+    }
+
     if (is_safe_to_run()) {
         Vector3f motor_out_rpy;
 
@@ -165,6 +183,12 @@ void AC_CustomControl::set_custom_controller(bool enabled)
         return;
     }
 
+    //Block Custom Controller activation when FSTRATE_ENABLE = 1, due to potential overwrite of motor output by PID in fast loop mode
+    if (enabled && fast_rate_enabled()) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CC: Set FSTRATE_ENABLE=0 to enable Custom controller");
+        return;
+    }
+
     // reset main controller
     if (!enabled) {
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Custom controller is OFF");
@@ -209,6 +233,18 @@ void AC_CustomControl::log_switch(void) {
                             AP_HAL::micros64(),
                             _controller_type,
                             _custom_controller_active);
+}
+
+bool AC_CustomControl::fast_rate_enabled(void)
+{
+    if (_fstrate_param == nullptr) {
+        return false;
+    }
+    if (is_zero(_fstrate_param->cast_to_float(_fstrate_param_type))) {
+        
+        return false;
+    }
+    return true;
 }
 
 void AC_CustomControl::set_notch_sample_rate(float sample_rate)
