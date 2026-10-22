@@ -68,6 +68,9 @@ PROFILE = [
     (3.0, 1500, 1500, 1500),     # settle
 ]
 
+#usar modo circulo o guided para que el controlador haga el movimiento del dron.
+#Modo circulo 
+
 
 class SITL:
     def __init__(self, binary, workdir, speedup):
@@ -322,6 +325,10 @@ def main():
         print('phase B: Testing NLC Super-Twisting controller')
         #switch to NLC controller by raising RC6, then fly the same profile
         sitl.pump(1.0 / args.speedup, ch6=2000)
+        #Start CCMO logging
+        for param, val in [('CC_OPTIONS', 1), ('MOT_THST_EXPO', 0), ('MOT_BAT_VOLT_MAX',0),
+                           ('MOT_SLEW_UP_TIME', 0), ('MOT_SLEW_DN_TIME', 0), ('FSTRATE_ENABLE',0)]:
+            sitl.set_param(param, val)
         win_b = fly_profile(sitl, 2000, args.speedup)
         #turn NLC off again so we can land with the main controller
         sitl.pump(1.0 / args.speedup, ch6=1000)

@@ -11,6 +11,7 @@
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Scheduler/AP_Scheduler.h>
+#include <SRV_Channel/SRV_Channel.h>
 
 // table of user settable parameters
 const AP_Param::GroupInfo AC_CustomControl::var_info[] = {
@@ -28,6 +29,14 @@ const AP_Param::GroupInfo AC_CustomControl::var_info[] = {
     // @Bitmask: 0:Roll, 1:Pitch, 2:Yaw
     // @User: Advanced
     AP_GROUPINFO("_AXIS_MASK", 2, AC_CustomControl, _custom_controller_mask, 0),
+
+
+    // @Param: _OPTIONS
+    // @DisplayName: Custom Controller options
+    // @Description: Custom Controller option bits
+    // @Bitmask: 0:Log per-motor output (CCMO) while armed
+    // @User: Advanced
+    AP_GROUPINFO("_OPTIONS", 3, AC_CustomControl, _options, 0),
 
     // parameters for empty controller. only used as a template, no need for param table 
     // AP_SUBGROUPVARPTR(_backend, "1_", 6, AC_CustomControl, _backend_var_info[0]),
@@ -245,6 +254,41 @@ bool AC_CustomControl::fast_rate_enabled(void)
         return false;
     }
     return true;
+}
+
+// log what the motors library produced from the current mixer inputs, per motor.
+// Called by the vehicle right after motors->output(), in the same loop.
+void AC_CustomControl::log_motor_output(void)
+{
+#if HAL_LOGGING_ENABLED
+    if (!option_set(Options::LOG_MOTORS) || !_motors->armed()) {
+        return;
+    }
+    const uint64_t now_us = AP_HAL::micros64();
+    for (uint8_t i = 0; i < AP_MOTORS_MAX_NUM_MOTORS; i++) {
+        if (!_motors->is_motor_enabled(i)) {
+            continue;
+        }
+        uint16_t pwm = 0;
+        SRV_Channels::get_output_pwm(SRV_Channels::get_motor_function(i), pwm);
+
+        // @LoggerMessage: CCMO
+        // @Description: Custom controller per-motor output chain
+        // @Field: TimeUS: Time since system startup
+        // @Field: I: motor index (0 based, MOTn = I+1)
+        // @Field: CC: 1 if the custom controller is active
+        // @Field: Thr: mixer thrust demand for this motor (_thrust_rpyt_out), 0..1
+        // @Field: Out: actuator command after thrust linearisation and slew (_actuator), 0..1
+        // @Field: PWM: PWM written to this motor output
+        AP::logger().WriteStreaming("CCMO", "TimeUS,I,CC,Thr,Out,PWM", "s#---Y", "F----0", "QBBffH",
+                                    now_us,
+                                    i,
+                                    uint8_t(_custom_controller_active),
+                                    _motors->get_thrust_rpyt_out(i),
+                                    _motors->get_actuator(i),
+                                    pwm);
+    }
+#endif
 }
 
 void AC_CustomControl::set_notch_sample_rate(float sample_rate)

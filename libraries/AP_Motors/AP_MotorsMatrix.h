@@ -101,8 +101,8 @@ public:
     };
     void add_motors_raw(const struct MotorDefRaw *motors, uint8_t num_motors);
 
-    // pull values direct, (examples only)
-    float get_thrust_rpyt_out(uint8_t i) const;
+    // pull values direct (examples and custom controller logging)
+    float get_thrust_rpyt_out(uint8_t i) const override;
     bool get_factors(uint8_t i, float &roll, float &pitch, float &yaw, float &throttle, uint8_t &testing_order) const;
 
 protected:

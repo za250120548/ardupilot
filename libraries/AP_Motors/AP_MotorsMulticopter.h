@@ -72,6 +72,15 @@ public:
     // get minimum or maximum pwm value that can be output to motors
     int16_t             get_pwm_output_min() const { return _pwm_min; }
     int16_t             get_pwm_output_max() const { return _pwm_max; }
+
+
+    // per-motor actuator command (0..1) after thrust linearisation and slew limiting,
+    // i.e. the value converted to PWM by output_to_pwm(). Read only, used for logging.
+    float               get_actuator(uint8_t i) const { return (i < AP_MOTORS_MAX_NUM_MOTORS) ? _actuator[i] : 0.0f; }
+
+    // per-motor thrust demand (0..1) produced by the mixer, before thrust linearisation.
+    // Implemented by matrix frames, other frames return 0. Read only, used for logging.
+    virtual float       get_thrust_rpyt_out(uint8_t i) const { return 0.0f; }
     
     // parameter check for MOT_PWM_MIN/MAX, returns true if parameters are valid
     bool check_mot_pwm_params() const;

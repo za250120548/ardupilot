@@ -32,6 +32,9 @@ public:
     void reset_main_att_controller(void);
     bool is_safe_to_run(void);
     void log_switch(void);
+    // log per-motor mixer and actuator outputs (CCMO message).
+    // Must be called right after the motors library has produced its output.
+    void log_motor_output(void);
 
     // set the PID notch sample rates
     void set_notch_sample_rate(float sample_rate);
@@ -62,6 +65,13 @@ protected:
     //in that case rate controller and motor output are running in a separate thread and custom controller overwrite is possible
     bool fast_rate_enabled(void);
 
+
+    // bits for CC_OPTIONS
+    enum class Options : uint8_t {
+        LOG_MOTORS = 1U << 0,   // log CCMO (per-motor output) while armed
+    };
+    bool option_set(Options opt) const { return (uint8_t(_options.get()) & uint8_t(opt)) != 0; }
+
     // Intersampling period in seconds
     float _dt;
     bool _custom_controller_active;
@@ -73,7 +83,7 @@ protected:
 
     AP_Enum<CustomControlType> _controller_type;
     AP_Int8 _custom_controller_mask;
-    
+    AP_Int8 _options;
     // pointer to the vehicle FSTRATE_ENABLE parameter (nullptr if it does not exist)
     AP_Param *_fstrate_param;
     enum ap_var_type _fstrate_param_type;

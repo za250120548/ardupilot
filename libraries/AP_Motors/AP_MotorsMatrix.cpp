@@ -1410,7 +1410,6 @@ void AP_MotorsMatrix::disable_yaw_torque(void)
     }
 }
 
-#if APM_BUILD_TYPE(APM_BUILD_UNKNOWN)
 // examples can pull values direct
 float AP_MotorsMatrix::get_thrust_rpyt_out(uint8_t i) const
 {
@@ -1420,6 +1419,7 @@ float AP_MotorsMatrix::get_thrust_rpyt_out(uint8_t i) const
     return 0.0;
 }
 
+#if APM_BUILD_TYPE(APM_BUILD_UNKNOWN)
 bool AP_MotorsMatrix::get_factors(uint8_t i, float &roll, float &pitch, float &yaw, float &throttle, uint8_t &testing_order) const
 {
     if ((i < AP_MOTORS_MAX_NUM_MOTORS) && motor_enabled[i]) {

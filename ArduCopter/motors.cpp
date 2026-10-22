@@ -106,6 +106,13 @@ void Copter::motors_output(bool full_push)
     } else {
         // send output signals to motors
         flightmode->output_to_motors();
+#if AC_CUSTOMCONTROL_MULTI_ENABLED
+        // per-motor log of what the motors library produced this loop (CC_OPTIONS bit 0).
+        // Not logged from the fast rate thread, the custom controller is not allowed there.
+        if (!using_rate_thread) {
+            custom_control.log_motor_output();
+        }
+#endif
     }
 
     // push all channels
