@@ -20,7 +20,8 @@ Usage (from the ArduPilot root, after ./waf copter):
     python3 Tools/NLC/sitl_rms_test.py --param CC3_K1_R=0.12 --param CC3_K2_R=0.4
 
 Each run also writes separate PID/STA attitude and rate CSV files, suitable for
-plotting measured and desired roll, pitch, and yaw over time.
+plotting measured and desired roll, pitch, and yaw over time, plus the STA
+output (CNLC) and the per-motor output chain (CCMO: mixer thrust, actuator, PWM).
 """
 
 import argparse
@@ -49,6 +50,14 @@ except (ImportError, AttributeError):
     from pymavlink import mavutil, DFReader  # noqa: E402
 
 HOME = '-35.363261,149.165230,584,353'
+
+# number of motors logged in CCMO (quad)
+N_MOTORS = 4
+
+# motor output chain configuration, applied BEFORE phase A so that both
+# controllers fly exactly the same plant. CC_OPTIONS=1 enables the CCMO log.
+MOTOR_SETUP = [('CC_OPTIONS', 1), ('MOT_THST_EXPO', 0), ('MOT_BAT_VOLT_MAX', 0),
+               ('MOT_SLEW_UP_TIME', 0), ('MOT_SLEW_DN_TIME', 0), ('FSTRATE_ENABLE', 0)]
 
 # deterministic stick profile: (seconds, roll_pwm, pitch_pwm, yaw_pwm)
 PROFILE = [
@@ -171,10 +180,11 @@ def analyse(logfile, windows):
     """windows: dict name -> (t0_us, t1_us)"""
     #Dictionary of lists for each test phase (PID and STA)
     res = {k: {'rate_Re': [], 'rate_Pe': [], 'rate_Ye': [], 'att_Re': [], 'att_Pe': [], 'sR': [], 'sP': [], 'sY': [], 'oR': [], 'oP': [], 'oY': []} for k in windows}
-    samples = {k: {'attitude': [], 'rate': [], 'cnlc': []} for k in windows}
+    samples = {k: {'attitude': [], 'rate': [], 'cnlc': [], 'ccmo': []} for k in windows}
+    ccmo_open = {k: None for k in windows}   # CCMO row being assembled per phase
     log = DFReader.DFReader_binary(logfile, zero_time_base=False)
     while True:
-        m = log.recv_match(type=['RATE', 'ATT', 'CNLC'])
+        m = log.recv_match(type=['RATE', 'ATT', 'CNLC', 'CCMO'])
         if m is None:
             break
         t = m.TimeUS
@@ -209,6 +219,22 @@ def analyse(logfile, windows):
                         # axes 1 and 2 complete the row opened by axis 0; if the window started
                         # mid-sample there is no open row yet, so they are skipped
                         samples[k]['cnlc'][-1][m.I+1] = m.U
+                elif m.get_type() == 'CCMO':
+                    # one CCMO message per motor and loop, all with the same TimeUS.
+                    # Assemble them into one wide row per loop:
+                    #   [t, CC, Thr_m1..m4, Out_m1..m4, PWM_m1..m4]
+                    row = ccmo_open[k]
+                    if m.I == 0:
+                        row = [t - a, m.CC] + [None] * (3 * N_MOTORS)
+                        ccmo_open[k] = row
+                        samples[k]['ccmo'].append(row)
+                    elif row is None or row[0] != t - a:
+                        # window started in the middle of a loop: skip until motor 0
+                        continue
+                    if m.I < N_MOTORS:
+                        row[2 + m.I] = m.Thr
+                        row[2 + N_MOTORS + m.I] = m.Out
+                        row[2 + 2 * N_MOTORS + m.I] = m.PWM
                 else:
                     raise RuntimeError('unexpected message type %s' % m.get_type())
     out = {}
@@ -223,6 +249,8 @@ def analyse(logfile, windows):
     #Convert from list to tuple to comply with the CSV writer that write tuples, not lists
     for k in samples:
         samples[k]['cnlc'] = [tuple(row) for row in samples[k]['cnlc']]
+        # keep only complete CCMO rows (all motors present)
+        samples[k]['ccmo'] = [tuple(row) for row in samples[k]['ccmo'] if None not in row]
     return out, samples
 
 
@@ -234,6 +262,10 @@ def write_samples(samples, output_dir):
         'rate': ('time_s', 'roll_deg_s', 'pitch_deg_s', 'yaw_deg_s',
                  'des_roll_deg_s', 'des_pitch_deg_s', 'des_yaw_deg_s'),
         'cnlc': ('time_s', 'U_roll', 'U_pitch', 'U_yaw'),
+        'ccmo': (('time_s', 'CC')
+                 + tuple('Thr_m%d' % (i + 1) for i in range(N_MOTORS))
+                 + tuple('Out_m%d' % (i + 1) for i in range(N_MOTORS))
+                 + tuple('PWM_m%d' % (i + 1) for i in range(N_MOTORS))),
     }
     os.makedirs(output_dir, exist_ok=True)
     paths = []
@@ -279,7 +311,10 @@ def main():
     args = ap.parse_args()
 
     
-    args.log_dir = os.path.abspath(args.log_dir+foldername)
+    # --log-dir is the parent directory; each run gets its own nlc_sitl_<timestamp> folder
+    if args.log_dir != work:
+        args.log_dir = os.path.join(args.log_dir, foldername)
+    args.log_dir = os.path.abspath(args.log_dir)
     preexisting = set(os.listdir(args.log_dir)) if os.path.isdir(args.log_dir) else None
     os.makedirs(args.log_dir, exist_ok=True)
     
@@ -293,6 +328,9 @@ def main():
             sitl.set_param(name, val)
         sitl.stop()
         sitl.start()
+        # same motor output chain for both phases; --param can still override it
+        for name, val in MOTOR_SETUP:
+            sitl.set_param(name, val)
         for kv in ['CC3_OPT=1'] + args.param:
             k, v = kv.split('=')
             sitl.set_param(k, float(v))
@@ -325,10 +363,6 @@ def main():
         print('phase B: Testing NLC Super-Twisting controller')
         #switch to NLC controller by raising RC6, then fly the same profile
         sitl.pump(1.0 / args.speedup, ch6=2000)
-        #Start CCMO logging
-        for param, val in [('CC_OPTIONS', 1), ('MOT_THST_EXPO', 0), ('MOT_BAT_VOLT_MAX',0),
-                           ('MOT_SLEW_UP_TIME', 0), ('MOT_SLEW_DN_TIME', 0), ('FSTRATE_ENABLE',0)]:
-            sitl.set_param(param, val)
         win_b = fly_profile(sitl, 2000, args.speedup)
         #turn NLC off again so we can land with the main controller
         sitl.pump(1.0 / args.speedup, ch6=1000)
@@ -357,7 +391,7 @@ def main():
         for ax in ('R', 'P', 'Y'):
             pid_rmse, sta_rmse = res['PID']['rate_'+ax+'e'], res['STA']['rate_'+ax+'e']
             print('  rate %s: %+6.1f %%' % (ax, 100.0 * (pid_rmse - sta_rmse) / pid_rmse))
-        print('\nRPY sample CSVs:')
+        print('\nSample CSVs:')
         for path in csv_paths:
             print(' ', path)
         print('log:', logs[-1])
