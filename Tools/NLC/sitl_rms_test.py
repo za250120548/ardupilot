@@ -165,11 +165,16 @@ class SITL:
 
 
 def fly_profile(sitl, ch6, speedup):
+    """fly PROFILE once; return (t0_us, t1_us) and the start of every stick segment.
+    Segment start times come from SYSTEM_TIME (~0.1 s resolution); the plotting
+    script refines them with the desired-rate signal."""
     t0 = sitl.boot_ms()
+    segments = []
     for dur, r, p, y in PROFILE:
+        segments.append((sitl.boot_ms() * 1000, dur, r, p, y))
         sitl.pump(dur / speedup, roll=r, pitch=p, yaw=y, ch6=ch6)
     t1 = sitl.boot_ms()
-    return t0 * 1000, t1 * 1000
+    return (t0 * 1000, t1 * 1000), segments
 
 
 def rms(vals):
@@ -203,7 +208,8 @@ def analyse(logfile, windows):
                     d['oP'].append(m.POut)
                     d['oY'].append(m.YOut)
                     #save time stamp, current R,P,Y and target R,P,Y for CSV output
-                    samples[k]['rate'].append((t - a, m.R, m.P, m.Y, m.RDes, m.PDes, m.YDes))
+                    samples[k]['rate'].append((t - a, m.R, m.P, m.Y, m.RDes, m.PDes, m.YDes,
+                                               m.ROut, m.POut, m.YOut))
                 elif m.get_type() == 'ATT':
                     #save Attitude error between desired and actual Roll and Pitch values in deg.
                     d['att_Re'].append(m.DesRoll - m.Roll)
@@ -260,7 +266,9 @@ def write_samples(samples, output_dir):
         'attitude': ('time_s', 'roll_deg', 'pitch_deg', 'yaw_deg',
                      'des_roll_deg', 'des_pitch_deg', 'des_yaw_deg'),
         'rate': ('time_s', 'roll_deg_s', 'pitch_deg_s', 'yaw_deg_s',
-                 'des_roll_deg_s', 'des_pitch_deg_s', 'des_yaw_deg_s'),
+                 'des_roll_deg_s', 'des_pitch_deg_s', 'des_yaw_deg_s',
+                 # mixer input of whichever controller is active (RATE.ROut/POut/YOut)
+                 'out_roll', 'out_pitch', 'out_yaw'),
         'cnlc': ('time_s', 'U_roll', 'U_pitch', 'U_yaw'),
         'ccmo': (('time_s', 'CC')
                  + tuple('Thr_m%d' % (i + 1) for i in range(N_MOTORS))
@@ -279,6 +287,38 @@ def write_samples(samples, output_dir):
                     writer.writerow((sample[0] / 1e6,) + sample[1:])
             paths.append(path)
     return paths
+
+
+def write_segments(segments, windows, output_dir):
+    """one row per stick segment and phase, times relative to the phase window start"""
+    path = os.path.join(output_dir, 'segments.csv')
+    with open(path, 'w', newline='') as output:
+        writer = csv.writer(output)
+        writer.writerow(('phase', 'index', 't_start_s', 'dur_nominal_s',
+                         'roll_pwm', 'pitch_pwm', 'yaw_pwm'))
+        for phase, segs in segments.items():
+            a = windows[phase][0]
+            for i, (t_us, dur, r, p, y) in enumerate(segs):
+                writer.writerow((phase, i, (t_us - a) / 1e6, dur, r, p, y))
+    return path
+
+
+def write_params(logfile, output_dir):
+    """last value of every parameter in the log (PARM), for reproducibility"""
+    values = {}
+    log = DFReader.DFReader_binary(logfile, zero_time_base=False)
+    while True:
+        m = log.recv_match(type='PARM')
+        if m is None:
+            break
+        values[m.Name] = m.Value
+    path = os.path.join(output_dir, 'params.csv')
+    with open(path, 'w', newline='') as output:
+        writer = csv.writer(output)
+        writer.writerow(('name', 'value'))
+        for name in sorted(values):
+            writer.writerow((name, values[name]))
+    return path
 
 
 def clean_workdir(path, preexisting):
@@ -358,12 +398,12 @@ def main():
         sitl.pump(3.0 / args.speedup)
 
         print('phase A: Testing main controller (P+PID)')
-        win_a = fly_profile(sitl, 1000, args.speedup)
+        win_a, seg_a = fly_profile(sitl, 1000, args.speedup)
 
         print('phase B: Testing NLC Super-Twisting controller')
         #switch to NLC controller by raising RC6, then fly the same profile
         sitl.pump(1.0 / args.speedup, ch6=2000)
-        win_b = fly_profile(sitl, 2000, args.speedup)
+        win_b, seg_b = fly_profile(sitl, 2000, args.speedup)
         #turn NLC off again so we can land with the main controller
         sitl.pump(1.0 / args.speedup, ch6=1000)
 
@@ -376,6 +416,9 @@ def main():
         logs = sorted(glob.glob(os.path.join(args.log_dir, 'logs', '*.BIN')), key=os.path.getmtime)
         res, samples = analyse(logs[-1], {'PID': win_a, 'STA': win_b})
         csv_paths = write_samples(samples, args.log_dir)
+        csv_paths.append(write_segments({'PID': seg_a, 'STA': seg_b},
+                                        {'PID': win_a, 'STA': win_b}, args.log_dir))
+        csv_paths.append(write_params(logs[-1], args.log_dir))
 
         print('\nRMS tracking error (deg/s for rate, deg for attitude)')
         print('%-6s %8s %8s %8s %8s %8s %6s' % ('', 'rate R', 'rate P', 'rate Y', 'att R', 'att P', 'n'))
