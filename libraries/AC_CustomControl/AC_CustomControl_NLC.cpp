@@ -144,7 +144,7 @@ float AC_CustomControl_NLC::sta_axis(uint8_t axis, float s, float k1, float k2, 
     u_p = k1 * safe_sqrt(fabsf(s)) * (is_negative(s) ? -1.0f : 1.0f);
 
     // integral term: dv/dt = k2 * sign(s)
-    const float dv = k2 * sgn(s) * _dt;
+    const float dv = _dt * (k2 * sgn(s));
 
     // conditional integration: when the mixer reports this axis is saturated,
     // do not let v grow further in the direction that drives the saturation
