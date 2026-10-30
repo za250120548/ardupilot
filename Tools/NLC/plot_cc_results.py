@@ -508,38 +508,58 @@ def main():
     fmt = [f.strip() for f in args.format.split(',') if f.strip()]
     out_dir = args.out or os.path.join(args.run_dir, 'figs')
     os.makedirs(out_dir, exist_ok=True)
-    B, C, lb, lc = args.baseline_prefix, args.custom_prefix, args.baseline_label, args.custom_label
+    B = args.baseline_prefix
+    C = args.custom_prefix
+    lb = args.baseline_label
+    lc = args.custom_label
 
-    rb, rc = load(args.run_dir, B, 'rate'), load(args.run_dir, C, 'rate')
-    if rb is None or rc is None:
-        sys.exit('faltan %s_rate.csv o %s_rate.csv en %s' % (B, C, args.run_dir))
-    ab, ac = load(args.run_dir, B, 'attitude'), load(args.run_dir, C, 'attitude')
-    cb, cc = load(args.run_dir, B, 'ccmo'), load(args.run_dir, C, 'ccmo')
+    #Load Rate, Attitude and CCMO CSVs from both controllers
+    rate_b = load(args.run_dir, B, 'rate')
+    rate_c = load(args.run_dir, C, 'rate')
+
+    if rate_b is None or rate_c is None:
+        sys.exit('%s_rate.csv o %s_rate.csv missing in %s' % (B, C, args.run_dir))
+        
+    att_b = load(args.run_dir, B, 'attitude')
+    att_c = load(args.run_dir, C, 'attitude')
+    if att_b is None or att_c is None:
+        sys.exit('%s_attitude.csv or %s_attitude.csv missing in %s' % (B, C, args.run_dir))
+
+    ccmo_b = load(args.run_dir, B, 'ccmo')
+    ccmo_c = load(args.run_dir, C, 'ccmo')
+    if ccmo_b is None or ccmo_c is None:
+        sys.exit('%s_ccmo.csv or %s_ccmo.csv missing in %s' % (B, C, args.run_dir))
+
     params = load_params(args.run_dir)
-    mb = maneuvers(rb, load_segments(args.run_dir, B))
-    mc = maneuvers(rc, load_segments(args.run_dir, C))
+
+    mb = maneuvers(rate_b, load_segments(args.run_dir, B))
+    mc = maneuvers(rate_c, load_segments(args.run_dir, C))
 
     metrics = []
     written = []
-    written += save(fig_tracking(rb, rc, lb, lc), out_dir, '01_seguimiento_tasa', fmt)
-    written += save(fig_error(rb, rc, lb, lc, mb), out_dir, '02_error_tasa', fmt)
-    written += save(fig_rms(rb, rc, ab, ac, lb, lc, metrics), out_dir, '03_resumen_rms', fmt)
-    f = fig_response(rb, rc, mb, mc, lb, lc, args.window)
+    written += save(fig_tracking(rate_b, rate_c, lb, lc), out_dir, '01_seguimiento_tasa', fmt)
+    written += save(fig_error(rate_b, rate_c, lb, lc, mb), out_dir, '02_error_tasa', fmt)
+    written += save(fig_rms(rate_b, rate_c, att_b, att_c, lb, lc, metrics), out_dir, '03_resumen_rms', fmt)
+
+    f = fig_response(rate_b, rate_c, mb, mc, lb, lc, args.window)
     if f is not None:
         written += save(f, out_dir, '04_respuesta_maniobra', fmt)
-    f = fig_settling(rb, rc, mb, mc, lb, lc, args.band, metrics)
+
+    f = fig_settling(rate_b, rate_c, mb, mc, lb, lc, args.band, metrics)
     if f is not None:
         written += save(f, out_dir, '05_asentamiento', fmt)
-    if 'out_roll' in rb.columns and 'out_roll' in rc.columns:
-        written += save(fig_effort(rb, rc, lb, lc, metrics), out_dir, '06_esfuerzo_control', fmt)
+
+    if 'out_roll' in rate_b.columns and 'out_roll' in rate_c.columns:
+        written += save(fig_effort(rate_b, rate_c, lb, lc, metrics), out_dir, '06_esfuerzo_control', fmt)
     else:
         print('aviso: los CSV de tasa no tienen out_roll/out_pitch/out_yaw; se omite la fig. 06')
-    if cb is not None or cc is not None:
-        written += save(fig_linearity(cb, cc, lb, lc, args.motors, params, metrics),
+
+    if ccmo_b is not None or ccmo_c is not None:
+        written += save(fig_linearity(ccmo_b, ccmo_c, lb, lc, args.motors, params, metrics),
                         out_dir, '07_linealidad_ccmo', fmt)
-        written += save(fig_reversibility(cb, cc, args.motors, params, metrics),
+        written += save(fig_reversibility(ccmo_b, ccmo_c, args.motors, params, metrics),
                         out_dir, '08_reversibilidad_ccmo', fmt)
-        written += save(fig_pwm(cb, cc, lb, lc, args.motors), out_dir, '09_pwm_motores', fmt)
+        written += save(fig_pwm(ccmo_b, ccmo_c, lb, lc, args.motors), out_dir, '09_pwm_motores', fmt)
     else:
         print('aviso: no hay CSV de CCMO; se omiten las figs. 07-09')
 
