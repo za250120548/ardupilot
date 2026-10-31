@@ -264,4 +264,18 @@ void AC_CustomControl_NLC::reset(void)
     _u_last = _v;
 }
 
+// STA integral state v for one axis (0 roll, 1 pitch, 2 yaw), in mixer units (-1..1).
+// The frontend mirrors it into the main rate PID integrator so checks that
+// read it (e.g. yaw imbalance) see the integrator of the active controller.
+float AC_CustomControl_NLC::get_integrator(uint8_t axis) const
+{
+    //Integrator is used in the custom controller, if not used return 0.0f to avoid integrator build up in the main controller.
+    if (axis > 2) {
+        return (0.0f);
+    }
+
+    // return the corresponding axis
+    return _v[axis];
+}
+
 #endif  // AP_COPTER_CUSTOMCONTROL_NLC_ENABLED

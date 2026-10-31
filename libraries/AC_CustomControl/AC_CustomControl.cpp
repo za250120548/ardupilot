@@ -130,21 +130,38 @@ void AC_CustomControl::update(void)
 void AC_CustomControl::motor_set(Vector3f rpy) {
     // set the FeedForward FF = 0 to avoid any unexpected behavior on the custom controller output.
     //ensures that the custom controller has full control over axis without any interference from the FF component.
+    Vector3f i_scale{1.0f, 1.0f, 1.0f};
     if (_custom_controller_mask & (uint8_t)CustomControlOption::ROLL) {
         _motors->set_roll(rpy.x);
+        //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_roll_ff(0.0f);
-        _att_control->get_rate_roll_pid().set_integrator(0.0);
+        // mirror the active controller integrator into the rate PID so that
+        //checks reading it (yaw imbalance) keep working
+        float cc_Ix = _backend->get_integrator(0);
+        _att_control->get_rate_roll_pid().set_integrator(cc_Ix);
+        i_scale.x = 0.0f;
     }
     if (_custom_controller_mask & (uint8_t)CustomControlOption::PITCH) {
         _motors->set_pitch(rpy.y);
+        //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_pitch_ff(0.0f);
-        _att_control->get_rate_pitch_pid().set_integrator(0.0);
+        // mirror the active controller integrator into the rate PID so that
+        //checks reading it (yaw imbalance) keep working
+        float cc_Iy = _backend->get_integrator(1);
+        _att_control->get_rate_pitch_pid().set_integrator(cc_Iy);
+        i_scale.y = 0.0f;
     }
     if (_custom_controller_mask & (uint8_t)CustomControlOption::YAW) {
         _motors->set_yaw(rpy.z);
+        //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_yaw_ff(0.0f);
-        _att_control->get_rate_yaw_pid().set_integrator(0.0);
+        // mirror the active controller integrator into the rate PID so that
+        //checks reading it (yaw imbalance) keep working
+        float cc_Iz = _backend->get_integrator(2);
+        _att_control->get_rate_yaw_pid().set_integrator(cc_Iz);
+        i_scale.z = 0.0f;
     }
+    _att_control->set_I_scale_mult(i_scale);
 }
 
 // move main controller's target to current states, reset filters,

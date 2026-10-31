@@ -28,6 +28,8 @@ public:
     // set the PID notch sample rates
     virtual void set_notch_sample_rate(float sample_rate) {};
 
+    virtual float get_integrator(uint8_t axis) const {return 0.0f;};
+
 protected:
     // References to external libraries
     AP_AHRS_View*& _ahrs;
