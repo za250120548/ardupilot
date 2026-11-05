@@ -22,6 +22,10 @@ public:
     // set the PID notch sample rates
     void set_notch_sample_rate(float sample_rate) override;
 
+    // Get integrator per axis return true if integrator is used
+    // axis value is Iroll=0, Ipitch = 1, Iyaw=2, mixer inputs (-1..1)
+    bool get_integrator(uint8_t axis, float *value) const override;
+
     // user settable parameters
     static const struct AP_Param::GroupInfo var_info[];
 

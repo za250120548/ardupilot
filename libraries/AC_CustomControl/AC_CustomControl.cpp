@@ -136,18 +136,21 @@ void AC_CustomControl::motor_set(Vector3f rpy) {
         //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_roll_ff(0.0f);
         // mirror the active controller integrator into the rate PID so that
-        //checks reading it (yaw imbalance) keep working
-        float cc_Ix = _backend->get_integrator(0);
+        //yaw imbalance keep working
+        float cc_Ix = 0.0f;
+        (void)_backend->get_integrator(0, &cc_Ix);
         _att_control->get_rate_roll_pid().set_integrator(cc_Ix);
         i_scale.x = 0.0f;
+        
     }
     if (_custom_controller_mask & (uint8_t)CustomControlOption::PITCH) {
         _motors->set_pitch(rpy.y);
         //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_pitch_ff(0.0f);
         // mirror the active controller integrator into the rate PID so that
-        //checks reading it (yaw imbalance) keep working
-        float cc_Iy = _backend->get_integrator(1);
+        //yaw imbalance keep working
+        float cc_Iy = 0.0f;
+        (void)_backend->get_integrator(1, &cc_Iy);
         _att_control->get_rate_pitch_pid().set_integrator(cc_Iy);
         i_scale.y = 0.0f;
     }
@@ -157,7 +160,8 @@ void AC_CustomControl::motor_set(Vector3f rpy) {
         _motors->set_yaw_ff(0.0f);
         // mirror the active controller integrator into the rate PID so that
         //checks reading it (yaw imbalance) keep working
-        float cc_Iz = _backend->get_integrator(2);
+        float cc_Iz = 0.0f;
+        (void)_backend->get_integrator(2, &cc_Iz);
         _att_control->get_rate_yaw_pid().set_integrator(cc_Iz);
         i_scale.z = 0.0f;
     }
@@ -228,6 +232,9 @@ void AC_CustomControl::set_custom_controller(bool enabled)
         // reset custom controller filter, integrator etc.
         _backend->reset();
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Custom controller is ON");
+    }
+    if ( _custom_controller_mask & 0x4 && (_backend->get_integrator(2, nullptr) == true) ) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Custom controller yaw imbalance check not available - Integrator controlling YAW");
     }
 
     _custom_controller_active = enabled;

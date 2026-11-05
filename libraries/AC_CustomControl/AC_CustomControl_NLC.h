@@ -44,8 +44,9 @@ public:
     // initialise the STA integral state from the current mixer input (bumpless)
     void reset(void) override;
 
-    // Get integrator per axis return Iroll=0, Ipitch = 1, Iyaw=2, mixer inputs (-1..1)
-    float get_integrator(uint8_t axis) const override;
+    // Get integrator per axis return true if integrator is used
+    // axis value is Iroll=0, Ipitch = 1, Iyaw=2, mixer inputs (-1..1)
+    bool get_integrator(uint8_t axis, float *value) const override;
 
 
     // user settable parameters
