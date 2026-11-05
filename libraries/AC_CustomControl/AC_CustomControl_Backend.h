@@ -30,7 +30,7 @@ public:
 
     /*Get the integrator value for a specific axis if the controller has one */
     /*in case the controller has none then implement the funtion returning*/
-    virtual bool get_integrator(uint8_t axis, float *value) const = 0;
+    virtual bool get_integrator(uint8_t axis, float &value) const = 0;
 
 protected:
     // References to external libraries

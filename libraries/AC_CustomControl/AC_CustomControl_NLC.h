@@ -46,7 +46,7 @@ public:
 
     // Get integrator per axis return true if integrator is used
     // axis value is Iroll=0, Ipitch = 1, Iyaw=2, mixer inputs (-1..1)
-    bool get_integrator(uint8_t axis, float *value) const override;
+    bool get_integrator(uint8_t axis, float &value) const override;
 
 
     // user settable parameters
