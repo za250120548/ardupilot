@@ -405,7 +405,7 @@ void AC_CustomControl_PID::set_notch_sample_rate(float sample_rate)
 #endif
 }
 
-// STA integral state v for one axis (0 roll, 1 pitch, 2 yaw), in mixer units (-1..1).
+// Integrator of the backend for one axis (0 roll, 1 pitch, 2 yaw), in mixer units (-1..1).
 // The frontend mirrors it into the main rate PID integrator so checks that
 // read it (e.g. yaw imbalance) see the integrator of the active controller.
 bool AC_CustomControl_PID::get_integrator(uint8_t axis, float &value) const

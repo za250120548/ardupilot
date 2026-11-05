@@ -71,4 +71,16 @@ void AC_CustomControl_Empty::reset(void)
 {
 }
 
+//Function to get the corresponding axis integrator, mandatory to be implemented
+// The frontend mirrors it into the main rate PID integrator so 
+// yaw imbalance is activated.
+bool AC_CustomControl_Empty::get_integrator(uint8_t axis, float &value) const
+{
+    
+    // Returns the integral per axis of the controller, if used returns true
+    // and updated integrator value, if not used return false and integrator as 0.0f
+    value = 0.0f;
+    return false;
+}
+
 #endif  // AP_COPTER_CUSTOMCONTROL_EMPTY_ENABLED

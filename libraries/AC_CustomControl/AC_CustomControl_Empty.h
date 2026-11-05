@@ -17,6 +17,10 @@ public:
     // user settable parameters
     static const struct AP_Param::GroupInfo var_info[];
 
+    // Get integrator per axis return true if integrator is used
+    // axis value is Iroll=0, Ipitch = 1, Iyaw=2, mixer inputs (-1..1)
+    bool get_integrator(uint8_t axis, float &value) const override;
+
 protected:
     // declare parameters here
     AP_Float param1;

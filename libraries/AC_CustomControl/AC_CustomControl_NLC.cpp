@@ -265,6 +265,7 @@ void AC_CustomControl_NLC::reset(void)
 }
 
 // STA integral state v for one axis (0 roll, 1 pitch, 2 yaw), in mixer units (-1..1).
+// STA always return true since the integrator is used.
 // The frontend mirrors it into the main rate PID integrator so checks that
 // read it (e.g. yaw imbalance) see the integrator of the active controller.
 // if integrator is used return true, if not used return false to warn tha yaw imbalance check is not available
@@ -277,7 +278,6 @@ bool AC_CustomControl_NLC::get_integrator(uint8_t axis, float &value) const
     }
     //Get Integrator value for the specific axis, if the controller has one.
     value = _v[axis];
-    
     return true;
 }
 
