@@ -28,7 +28,7 @@ public:
     // set the PID notch sample rates
     virtual void set_notch_sample_rate(float sample_rate) {};
 
-     // Integrator of the backend for one axis (0 roll, 1 pitch, 2 yaw), mixer units (-1..1).
+    // Integrator of the backend for one axis (0 roll, 1 pitch, 2 yaw), mixer units (-1..1).
     // Return true and set value if the algorithm has an integrator on that axis, even if it is 0.
     // If it has none, set value = 0 and return false: the frontend then warns that the
     // yaw imbalance check is unavailable. Never infer availability from the value.

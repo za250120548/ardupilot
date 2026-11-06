@@ -268,15 +268,14 @@ void AC_CustomControl_NLC::reset(void)
 // STA always return true since the integrator is used.
 // The frontend mirrors it into the main rate PID integrator so checks that
 // read it (e.g. yaw imbalance) see the integrator of the active controller.
-// if integrator is used return true, if not used return false to warn tha yaw imbalance check is not available
 bool AC_CustomControl_NLC::get_integrator(uint8_t axis, float &value) const
 {
-    //Check the correctnes of the index,if out of limits return false and 0.0f to avoid integrator build up in the main controller./
+    //Check the correctness of the index,if out of limits return false and 0.0f
     if (axis > 2) {
         value = 0.0f;
         return false;
     }
-    //Get Integrator value for the specific axis, if the controller has one.
+    //Get STA Integrator value for the specific axis
     value = _v[axis];
     return true;
 }

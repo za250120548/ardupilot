@@ -146,7 +146,6 @@ void AC_CustomControl::motor_set(Vector3f rpy) {
         //set the feedforward calculated from PID to avoid interference with custom controller
         _motors->set_pitch_ff(0.0f);
         // mirror the active controller integrator into the rate PID
-        //yaw imbalance keep working
         float cc_Iy = 0.0f;
         (void)_backend->get_integrator(1, cc_Iy);
         _att_control->get_rate_pitch_pid().set_integrator(cc_Iy);
@@ -230,11 +229,10 @@ void AC_CustomControl::set_custom_controller(bool enabled)
         // reset custom controller filter, integrator etc.
         _backend->reset();
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Custom controller is ON");
-    
         float yaw_integrator = 0.0f;
         if ((_custom_controller_mask & (uint8_t)CustomControlOption::YAW) &&
-        (_backend->get_integrator(2, yaw_integrator) == false) ) {
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Custom Controller yaw imbalance check unavailable");
+        (!_backend->get_integrator(2, yaw_integrator)) ) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Custom Controller yaw imbalance check unavailable");
         }
     }
     _custom_controller_active = enabled;

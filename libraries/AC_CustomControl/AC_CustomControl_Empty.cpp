@@ -71,14 +71,11 @@ void AC_CustomControl_Empty::reset(void)
 {
 }
 
-//Function to get the corresponding axis integrator, mandatory to be implemented
-// The frontend mirrors it into the main rate PID integrator so 
-// yaw imbalance is activated.
+// Mandatory. This template has no integrator, so it sets value = 0 and returns false
+// (the frontend then warns that the yaw imbalance check is unavailable).
+// If your algorithm has an integrator, set value to it and return true, even when it is 0.
 bool AC_CustomControl_Empty::get_integrator(uint8_t axis, float &value) const
 {
-    
-    // Returns the integral per axis of the controller, if used returns true
-    // and updated integrator value, if not used return false and integrator as 0.0f
     value = 0.0f;
     return false;
 }
