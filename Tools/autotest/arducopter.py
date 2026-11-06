@@ -1770,6 +1770,106 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.do_RTL()
         self.progress("Custom controller test complete")
 
+    # ------------------------------------------------------------------
+    # Custom controller (AC_CustomControl) safety validation
+    #
+    # Each CustomControllerNLC_* test runs the same failsafe scenario twice
+    # with identical checks: once with the main ArduCopter rate controller
+    # (P+PID) and once with the custom controller active, so that the safety
+    # mechanisms can be shown to behave the same with both.
+    # ------------------------------------------------------------------
+
+    # allowed lean beyond ATC_ANGLE_MAX before the test fails (deg)
+    CC_TILT_MARGIN_DEG = 5
+
+    def cc_setup(self, cc_type, active):
+        '''select the custom controller backend and switch it on or off with RC6'''
+        self.set_parameters({
+            'CC_TYPE': cc_type,
+            'CC_AXIS_MASK': 7,
+            'RC6_OPTION': 109,
+        })
+        self.set_rc(6, 1000)
+        self.reboot_sitl()      # CC_TYPE needs a reboot
+        if self.get_parameter('CC_TYPE') != cc_type:
+            raise NotAchievedException("CC_TYPE is not %u after reboot" % cc_type)
+        if active:
+            self.context_collect('STATUSTEXT')
+            self.set_rc(6, 2000)
+            self.wait_statustext("Custom controller is ON", check_context=True)
+
+    def cc_flight_monitor(self, results, tilt_limit_deg):
+        '''message hook: fails the test if the vehicle leans more than
+        tilt_limit_deg and records the data used for the comparison report'''
+        def hook(mav, m):
+            m_type = m.get_type()
+            if m_type == 'ATTITUDE':
+                tilt = math.degrees(max(abs(m.roll), abs(m.pitch)))
+                results['max_tilt_deg'] = max(results['max_tilt_deg'], tilt)
+                if tilt > tilt_limit_deg:
+                    raise NotAchievedException(
+                        "lean %.1f deg exceeds the %.1f deg limit" % (tilt, tilt_limit_deg))
+            elif m_type == 'STATUSTEXT':
+                results['texts'].append((self.get_sim_time_cached(), m.text))
+            elif m_type == 'HEARTBEAT' and m.autopilot != mavutil.mavlink.MAV_AUTOPILOT_INVALID:
+                armed = (m.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) != 0
+                if results['armed'] and not armed:
+                    results['disarm_t'] = self.get_sim_time_cached()
+                results['armed'] = armed
+        return hook
+
+    def cc_ab_test(self, scenario, cc_type=3, cc_label="STA", cc_stays_on=True, expect_flight=True):
+        '''run scenario() with the main controller and with the custom
+        controller, apply the common checks to both and report the comparison.
+        scenario() must take off, trigger the failsafe and end landed and disarmed
+        (use expect_flight=False for scenarios that never arm, e.g. pre-arm checks).
+        cc_stays_on: fail if the custom controller is switched off during the scenario.'''
+        report = []
+        for label, active in (("P+PID", False), (cc_label, True)):
+            self.start_subtest("%s with %s" % (scenario.__name__, label))
+            self.context_push()
+            self.cc_setup(cc_type, active)
+            results = {'max_tilt_deg': 0.0, 'texts': [], 'armed': False, 'disarm_t': None}
+            tilt_limit = self.get_parameter('ATC_ANGLE_MAX') + self.CC_TILT_MARGIN_DEG
+            self.install_message_hook_context(self.cc_flight_monitor(results, tilt_limit))
+            t_start = self.get_sim_time()
+            scenario()
+            results['duration_s'] = self.get_sim_time() - t_start
+            self.context_pop()      # removes the monitor hook
+            self.set_rc(6, 1000)    # after the hook, so this OFF is not counted as a failure
+
+            # common checks
+            texts = [text for _, text in results['texts']]
+            crash = [text for text in texts if 'Crash' in text]
+            if crash:
+                raise NotAchievedException("%s: crash detected: %s" % (label, crash))
+            if active and cc_stays_on and "Custom controller is OFF" in texts:
+                raise NotAchievedException("%s: custom controller switched off during the failsafe" % label)
+            if expect_flight and results['disarm_t'] is None:
+                raise NotAchievedException("%s: vehicle did not disarm" % label)
+            report.append((label, results))
+
+        self.reboot_sitl()      # leave CC_TYPE=0 active for the following tests
+        self.progress("Custom controller A/B report for %s:" % scenario.__name__)
+        for label, r in report:
+            disarm = "%7.1f s" % r['disarm_t'] if r['disarm_t'] is not None else "      -"
+            self.progress("  %-6s max lean %5.1f deg, scenario %6.1f s, disarmed at %s (sim time)" % (
+                label, r['max_tilt_deg'], r['duration_s'], disarm))
+        return report
+
+    def CustomControllerNLC_Battery(self):
+        '''Two stage battery failsafe with P+PID and with the NLC (STA) custom controller'''
+        # The existing BatteryFailsafeTwoStage test is used unchanged as the
+        # scenario: low battery -> RTL, critical battery -> LAND, disarm.
+        report = self.cc_ab_test(self.BatteryFailsafeTwoStage)
+
+        # time from the critical battery warning to disarm, for the thesis report
+        for label, r in report:
+            t_crit = [t for t, text in r['texts'] if "Battery 1 is critical" in text]
+            if not t_crit:
+                raise NotAchievedException("%s: no critical battery warning" % label)
+            self.progress("  %-6s critical battery -> disarmed in %.1f s" % (label, r['disarm_t'] - t_crit[0]))
+
     # Tests all actions and logic behind the battery failsafe
     def batt_failsafe_init(self):
         '''configure the common battery failsafe parameters shared by the
@@ -23222,6 +23322,7 @@ return update, 1000
             self.CustomController,
             self.WPArcs,
             self.BatteryFailsafeTwoStage,
+            self.CustomControllerNLC_Battery,
             self.BatteryFailsafeBrakeLand,
             self.MinAltFenceAvoid,
             self.FenceFloorEnabledLanding,
