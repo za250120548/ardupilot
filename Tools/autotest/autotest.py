@@ -25,6 +25,7 @@ from pymavlink.generator import mavtemplate
 
 import antennatracker
 import arducopter
+import arducopter_nlc
 import arduplane
 import ardusub
 import balancebot
@@ -288,6 +289,8 @@ __bin_names = {
     "CopterTests2c": "arducopter",
     "CopterTests2d": "arducopter",
 
+    "CopterNLC": "arducopter",   # custom controller safety tests (arducopter_nlc.py)
+
     "Plane": "arduplane",
     "PlaneTests1a": "arduplane",
     "PlaneTests1b": "arduplane",
@@ -371,6 +374,7 @@ tester_class_map = {
     "test.CopterTests2b": arducopter.AutoTestCopterTests2b, # ~14m on CI
     "test.CopterTests2c": arducopter.AutoTestCopterTests2c, # ~14m on CI
     "test.CopterTests2d": arducopter.AutoTestCopterTests2d, # ~14m on CI
+    "test.CopterNLC": arducopter_nlc.AutoTestCopterNLC,
     "test.Plane": arduplane.AutoTestPlane,
     "test.PlaneTests1a": arduplane.AutoTestPlaneTests1a, # ~12m on CI
     "test.PlaneTests1b": arduplane.AutoTestPlaneTests1b, # ~12m on CI
@@ -1193,6 +1197,7 @@ if __name__ == "__main__":
         'test.CopterTests2b',
         'test.CopterTests2c',
         'test.CopterTests2d',
+        'test.CopterNLC',
 
         'test.PlaneTests1a',
         'test.PlaneTests1b',
