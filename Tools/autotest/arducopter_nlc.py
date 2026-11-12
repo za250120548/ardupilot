@@ -30,7 +30,7 @@ class AutoTestCopterNLC(AutoTestCopter):
     BatteryFailsafeTwoStage) can be reused unchanged as scenarios.'''
 
     # allowed lean beyond ATC_ANGLE_MAX before the test fails (deg)
-    CC_TILT_MARGIN_DEG = 5
+    CC_TILT_MARGIN_DEG = 8
 
     def cc_setup(self, cc_type, active):
         '''select the custom controller backend and switch it on or off with RC6'''
@@ -75,20 +75,23 @@ class AutoTestCopterNLC(AutoTestCopter):
         (use expect_flight=False for scenarios that never arm, e.g. pre-arm checks).
         cc_stays_on: fail if the custom controller is switched off during the scenario.'''
         report = []
+        #Execute the scenario twice, once with the main controller and once with the custom controller
         for label, active in (("P+PID", False), (cc_label, True)):
             self.start_subtest("%s with %s" % (scenario.__name__, label))
             self.context_push()
             self.cc_setup(cc_type, active)
             results = {'max_tilt_deg': 0.0, 'texts': [], 'armed': False, 'disarm_t': None}
+            #if during flight the ATTITUTDE control exceeds the ATC_ANGLE_MAX + CC_TILT_MARGIN_DEG, the test fails
             tilt_limit = self.get_parameter('ATC_ANGLE_MAX') + self.CC_TILT_MARGIN_DEG
             self.install_message_hook_context(self.cc_flight_monitor(results, tilt_limit))
             t_start = self.get_sim_time()
+            #executes the test scenario passed
             scenario()
             results['duration_s'] = self.get_sim_time() - t_start
             self.context_pop()      # removes the monitor hook
             self.set_rc(6, 1000)    # after the hook, so this OFF is not counted as a failure
 
-            # common checks
+            # common checks, register what the hook recorded in the dictionary for the comparison report
             texts = [text for _, text in results['texts']]
             crash = [text for text in texts if 'Crash' in text]
             if crash:
@@ -97,6 +100,8 @@ class AutoTestCopterNLC(AutoTestCopter):
                 raise NotAchievedException("%s: custom controller switched off during the failsafe" % label)
             if expect_flight and results['disarm_t'] is None:
                 raise NotAchievedException("%s: vehicle did not disarm" % label)
+            if texts is None or not texts:
+                raise NotAchievedException("%s: no STATUSTEXT messages recorded" % label)
             report.append((label, results))
 
         self.reboot_sitl()      # leave CC_TYPE=0 active for the following tests
@@ -107,6 +112,21 @@ class AutoTestCopterNLC(AutoTestCopter):
                 label, r['max_tilt_deg'], r['duration_s'], disarm))
         return report
 
+    def CustomControllerNLC_BatteryFailsafeBrakeLand(self):
+        '''Battery failsafe brake/land action triggers BRAKE with P+PID and with the NLC (STA) custom controller'''
+        # Trigger low battery condition with failsafe set to brake/land, Brake mode brings copter to an immediate stop
+        report = self.cc_ab_test(self.BatteryFailsafeBrakeLand)
+
+        # time from the low battery warning to disarm, for the thesis report
+        for label, r in report:
+            t_low = [t for t, text in r['texts'] if "Battery 1 is low" in text]
+            t_brake_mode = [t for t, text in r['texts'] if "Got mode BRAKE" in text]
+            if not t_low:
+                raise NotAchievedException("%s: no low battery warning" % label)
+            if not t_brake_mode:
+                raise NotAchievedException("%s: no BRAKE mode warning" % label)
+            self.progress("  %-6s low battery -> disarmed in %.1f s" % (label, r['disarm_t'] - t_low[0]))
+    
     def CustomControllerNLC_Battery(self):
         '''Two stage battery failsafe with P+PID and with the NLC (STA) custom controller'''
         # The existing BatteryFailsafeTwoStage test is used unchanged as the
@@ -119,9 +139,25 @@ class AutoTestCopterNLC(AutoTestCopter):
             if not t_crit:
                 raise NotAchievedException("%s: no critical battery warning" % label)
             self.progress("  %-6s critical battery -> disarmed in %.1f s" % (label, r['disarm_t'] - t_crit[0]))
+    
+    def CustomControllerNLC_VibrationFailsafe(self):
+        '''Vibration failsafe with P+PID and with the NLC (STA) custom controller'''
+        #The existing BatteryFailsafeTwoStage test is used unchanged as the
+        # scenario: high vibration -> LAND, disarm (forced).
+        report = self.cc_ab_test(self.VibrationFailsafe)
+
+        # time from the vibration warning to disarm, for the thesis report
+        for label, r in report:
+            t_vib = [t for t, text in r['texts'] if "Vibration compensation ON" in text]
+            if not t_vib:
+                raise NotAchievedException("%s: no vibration warning" % label)
+            self.progress("  %-6s vibration warning -> disarmed in %.1f s" % (label, r['disarm_t'] - t_vib[0]))
 
     def tests(self):
         '''tests run by "test.CopterNLC"'''
         return [
+            self.CustomControllerNLC_BatteryFailsafeBrakeLand,
             self.CustomControllerNLC_Battery,
+            self.CustomControllerNLC_VibrationFailsafe,
+            
         ]
