@@ -114,6 +114,45 @@ class AutoTestCopterNLC(AutoTestCopter):
                 label, r['max_tilt_deg'], r['duration_s'], disarm))
         return report
 
+    def cc_prearm_scenario(self):
+        '''Pre-arm checks throttle with P+PID and with the NLC (STA) custom controller'''
+        # The arm check confirm that UAV is healthy if failsafe is triggered.
+        self.wait_ready_to_arm()
+        self.change_mode("STABILIZE")
+
+        # cause 1: Set failure RC3 high to trigger the prearm failsafe
+        self.set_rc(3, 1800)
+        self.assert_arm_failure("Throttle too high")
+        # remove failure cause 1: Set RC3 low to clear the prearm failsafe
+        self.set_rc(3, 1000)  # set RC3 low to clear the prearm failsafe
+
+        # cause 2: forbidden mode
+        self.change_mode('RTL')
+        self.assert_arm_failure("RTL mode not armable")
+        # remove failure cause 2: Set mode to STABILIZE to clear the prearm failsafe
+        self.change_mode("STABILIZE")
+
+        # Cause 3: low battery
+        self.set_parameter('BATT_ARM_VOLT', 13.0)
+        self.assert_arm_failure("below minimum arming voltage")
+        # Remove failure cause 3: Disable  BATT_ARM_VOLT check
+        self.set_parameter('BATT_ARM_VOLT', 0)
+
+        # Cause 4: motors miss configuration
+        # Read the current values of MOT_PWM_MIN and MOT_PWM_MAX to restore them later
+        pwm_min = self.get_parameter('MOT_PWM_MIN')
+        pwm_max = self.get_parameter('MOT_PWM_MAX')
+        self.set_parameters({'MOT_PWM_MIN': 100, 'MOT_PWM_MAX': 50})
+        self.assert_arm_failure("Motors: Check MOT_PWM_MIN and MOT_PWM_MAX")
+        # Remove failure cause 4: Set MOT_PWM_MIN and MOT_PWM_MAX to valid values to clear the prearm failsafe
+        self.set_parameters({'MOT_PWM_MIN': pwm_min, 'MOT_PWM_MAX': pwm_max})
+
+        # Positive test: Arm and disarm the vehicle to confirm that the prearm checks are cleared
+        self.arm_vehicle()
+        self.delay_sim_time(3, reason="armed on the ground")
+        self.disarm_vehicle()
+
+
     def CustomControllerNLC_BatteryFailsafeBrakeLand(self):
         '''Battery failsafe brake/land action triggers BRAKE with P+PID and with the NLC (STA) custom controller'''
         # Trigger low battery condition with failsafe set to brake/land, Brake mode brings copter to an immediate stop
@@ -152,10 +191,16 @@ class AutoTestCopterNLC(AutoTestCopter):
                 raise NotAchievedException("%s: no vibration warning" % label)
             self.progress("  %-6s vibration warning -> disarmed in %.1f s" % (label, r['disarm_t'] - t_vib[0]))
 
+    def CustomControllerNLC_Prearm(self):
+        '''Pre-arm checks with P+PID and with the NLC (STA) custom controller'''
+        report = self.cc_ab_test(self.cc_prearm_scenario, cc_stays_on=False, expect_flight=False)
+
+
     def tests(self):
         '''tests run by "test.CopterNLC"'''
         return [
             self.CustomControllerNLC_BatteryFailsafeBrakeLand,
             self.CustomControllerNLC_Battery,
             self.CustomControllerNLC_VibrationFailsafe,
+            self.CustomControllerNLC_Prearm,
         ]
