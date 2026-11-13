@@ -114,6 +114,28 @@ class AutoTestCopterNLC(AutoTestCopter):
                 label, r['max_tilt_deg'], r['duration_s'], disarm))
         return report
 
+    def cc_scenario_gcs_failsafe(self):
+        '''GCS failsafe triggers RTL with P+PID and with the NLC (STA) custom controller'''
+        # wait the vehicle to be ready to arm after reboot
+        self.wait_ready_to_arm()
+        # set the GCS to use
+        self.set_parameter("MAV_GCS_SYSID", self.mav.source_system)
+        # Activate the GCS failsafe
+        self.setGCSfailsafe(1)
+        fs_options = self.get_parameter('FS_OPTIONS')
+        self.set_parameter('FS_OPTIONS', 0)
+        self.takeoffAndMoveAway()
+        # cause: GCS failsafe, AutoTest stops sending heartbeats
+        self.set_heartbeat_rate(0)
+        self.wait_statustext("GCS Failsafe", timeout=60)
+        self.wait_mode("RTL")
+        self.wait_landed_and_disarmed(timeout=150)  # RTL land & disarm by itself
+        # Remove failure cause: Set the GCS failsafe to off and restore the FS_OPTIONS parameter
+        self.set_heartbeat_rate(self.speedup)
+        self.wait_statustext("GCS Failsafe cleared", timeout=60)
+        self.setGCSfailsafe(0)
+        self.set_parameter('FS_OPTIONS', fs_options)
+
     def cc_prearm_scenario(self):
         '''Pre-arm checks throttle with P+PID and with the NLC (STA) custom controller'''
         # The arm check confirm that UAV is healthy if failsafe is triggered.
@@ -152,12 +174,10 @@ class AutoTestCopterNLC(AutoTestCopter):
         self.delay_sim_time(3, reason="armed on the ground")
         self.disarm_vehicle()
 
-
     def CustomControllerNLC_BatteryFailsafeBrakeLand(self):
         '''Battery failsafe brake/land action triggers BRAKE with P+PID and with the NLC (STA) custom controller'''
         # Trigger low battery condition with failsafe set to brake/land, Brake mode brings copter to an immediate stop
         report = self.cc_ab_test(self.BatteryFailsafeBrakeLand)
-
         # time from the low battery warning to disarm, for the thesis report
         for label, r in report:
             t_low = [t for t, text in r['texts'] if "Battery 1 is low" in text]
@@ -195,6 +215,9 @@ class AutoTestCopterNLC(AutoTestCopter):
         '''Pre-arm checks with P+PID and with the NLC (STA) custom controller'''
         report = self.cc_ab_test(self.cc_prearm_scenario, cc_stays_on=False, expect_flight=False)
 
+    def CustomControllerNLC_GCSFailsafe(self):
+        '''GCS failsafe with P+PID and with the NLC (STA) custom controller'''
+        report = self.cc_ab_test(self.cc_scenario_gcs_failsafe, cc_stays_on=True, expect_flight=True)
 
     def tests(self):
         '''tests run by "test.CopterNLC"'''
@@ -203,4 +226,5 @@ class AutoTestCopterNLC(AutoTestCopter):
             self.CustomControllerNLC_Battery,
             self.CustomControllerNLC_VibrationFailsafe,
             self.CustomControllerNLC_Prearm,
+            self.CustomControllerNLC_GCSFailsafe,
         ]
